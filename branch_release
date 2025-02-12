@@ -1,0 +1,84 @@
+#!/bin/bash
+set -euo pipefail
+
+# -------------------------------------------------------------------
+# This script assumes:
+# - It is running in a GitHub Actions release event where GITHUB_REF
+#   is set (e.g. "refs/tags/v1.2.3" or "refs/tags/1.2.3").
+# - The GitHub CLI (gh) is installed and logged in.
+#
+# What it does:
+# 1. Extracts the semver (major.minor.patch) from the current release tag.
+# 2. Computes the target MAJOR branch release (e.g. "1.x.x") and the
+#    target MINOR branch release (e.g. "1.2.x").
+# 3. Downloads all assets from the current release.
+# 4. For each target release:
+#     - If it does not exist, it creates a new release with that tag.
+#     - Uploads (or overwrites, via --clobber) the downloaded assets.
+# -------------------------------------------------------------------
+
+# Determine the current release tag.
+# (Assumes that GITHUB_REF is like "refs/tags/v1.2.3")
+if [ -z "${GITHUB_REF:-}" ]; then
+  echo "GITHUB_REF is not set. Exiting."
+  exit 1
+fi
+
+CURRENT_TAG="${GITHUB_REF##*/}"
+echo "Current release tag: $CURRENT_TAG"
+
+# Remove a leading "v" if present (e.g. "v1.2.3" -> "1.2.3")
+SEMVER=$(echo "$CURRENT_TAG" | sed 's/^v//')
+echo "Parsed semver: $SEMVER"
+
+# Extract major, minor, patch numbers.
+IFS='.' read -r MAJOR MINOR PATCH <<< "$SEMVER"
+if [ -z "$MAJOR" ] || [ -z "$MINOR" ] || [ -z "$PATCH" ]; then
+  echo "Invalid semver detected: $SEMVER"
+  exit 1
+fi
+
+# Build target release tags using "x" for unspecified parts.
+MAJOR_RELEASE="${MAJOR}.x.x"
+MINOR_RELEASE="${MAJOR}.${MINOR}.x"
+echo "Target MAJOR release: $MAJOR_RELEASE"
+echo "Target MINOR release: $MINOR_RELEASE"
+
+# Create a temporary directory for the current release’s assets.
+ASSETS_DIR=$(mktemp -d)
+echo "Downloading assets into ${ASSETS_DIR}..."
+gh release download "$CURRENT_TAG" -D "$ASSETS_DIR"
+
+# Function to create or update a target release by uploading assets.
+create_or_update_release() {
+  local release_tag="$1"
+  echo "Processing release: ${release_tag}"
+
+  # Check if the release exists; if not, create it.
+  if ! gh release view "$release_tag" > /dev/null 2>&1; then
+    echo "Release ${release_tag} does not exist. Creating it."
+    gh release create "$release_tag" \
+      --title "$release_tag" \
+      --notes "Auto generated release branch for ${release_tag}"
+  else
+    echo "Release ${release_tag} already exists. Overwriting assets..."
+  fi
+
+  # Loop over each asset and upload (using --clobber to replace any existing asset
+  # with the same filename).
+  for asset in "$ASSETS_DIR"/*; do
+    if [ -f "$asset" ]; then
+      echo "Uploading asset: $(basename "$asset") to ${release_tag}"
+      gh release upload "$release_tag" "$asset" --clobber
+    fi
+  done
+}
+
+# Process both the major and minor target releases.
+create_or_update_release "$MAJOR_RELEASE"
+create_or_update_release "$MINOR_RELEASE"
+
+echo "Artifacts successfully copied/updated to ${MAJOR_RELEASE} and ${MINOR_RELEASE}."
+
+# Clean up the temporary assets directory.
+rm -rf "$ASSETS_DIR"
