@@ -1,0 +1,21 @@
+name: Copy Artifacts to Branch Releases
+
+on:
+  release:
+    types: [published, edited]
+
+jobs:
+  copy-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait a minute for assets to populate
+        run: sleep 60
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run copy-artifacts script
+        env:
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x ./branch_release
+          ./branch_release
