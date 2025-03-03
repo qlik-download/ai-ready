@@ -19,6 +19,7 @@ set -euo pipefail
 
 # Determine the current release tag.
 # (Assumes that GITHUB_REF is like "refs/tags/v1.2.3")
+GITHUB_REF=${GITHUB_REF:-${TAG_REF}}
 if [ -z "${GITHUB_REF:-}" ]; then
   echo "GITHUB_REF is not set. Exiting."
   exit 1
